@@ -67,7 +67,7 @@ class UserDB:
 
     def _load(self):
         if USERS_FILE.exists():
-            with open(USERS_FILE) as f:
+            with open(USERS_FILE, 'r', encoding='utf-8') as f:
                 self._db = json.load(f)
         else:
             # Bootstrap defaults
@@ -80,12 +80,12 @@ class UserDB:
                 entry['password_hash'] = ph
                 db[username] = entry
             self._db = db
-            USERS_FILE.parent.mkdir(exist_ok=True)
-            with open(USERS_FILE, 'w') as f:
+            USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with open(USERS_FILE, 'w', encoding='utf-8') as f:
                 json.dump(db, f, indent=2)
 
     def _save(self):
-        with open(USERS_FILE, 'w') as f:
+        with open(USERS_FILE, 'w', encoding='utf-8') as f:
             json.dump(self._db, f, indent=2)
 
     def authenticate(self, username: str, password: str) -> tuple[bool, str]:
@@ -151,6 +151,7 @@ class ClientSession(threading.Thread):
         super().__init__(daemon=True)
         self.conn = conn
         self.addr = f"{addr[0]}:{addr[1]}"
+        self.ip = addr[0]
         self.user_db = user_db
         self.rate_limiter = rate_limiter
         self.logger = logger
@@ -182,7 +183,7 @@ class ClientSession(threading.Thread):
 
     # ── Authentication Handshake ─────────────
     def _do_auth(self) -> bool:
-        if not self.rate_limiter.is_allowed(self.addr.split(':')[0]):
+        if not self.rate_limiter.is_allowed(self.ip):
             self.logger.security_event('RATE_LIMITED', self.addr)
             self._send_raw(MsgType.ERROR, {'code': int(AuthStatus.RATE_LIMITED),
                                            'message': 'Too many auth attempts'})
@@ -196,8 +197,16 @@ class ClientSession(threading.Thread):
         })
 
         # Step 2: Receive response
-        data = recv_packet(self.conn)
-        msg_type, payload = parse_secure_packet(data)
+        try:
+            data = recv_packet(self.conn)
+            msg_type, payload = parse_secure_packet(data)
+        except (ConnectionError, ValueError) as e:
+            self.logger.log('ERROR', session_id=self.session_id, error=str(e), client=self.addr)
+            try:
+                self._send_raw(MsgType.ERROR, {'message': 'Invalid auth packet'})
+            except Exception:
+                pass
+            return False
         if msg_type != MsgType.AUTH_RESPONSE:
             return False
 
@@ -236,8 +245,12 @@ class ClientSession(threading.Thread):
     def _command_loop(self):
         self.conn.settimeout(SESSION_TIMEOUT := 3600)
         while True:
-            data = recv_packet(self.conn)
-            msg_type, payload = parse_secure_packet(data, self.session_key)
+            try:
+                data = recv_packet(self.conn)
+                msg_type, payload = parse_secure_packet(data, self.session_key)
+            except (ConnectionError, ValueError) as e:
+                self.logger.log('ERROR', session_id=self.session_id, error=str(e), client=self.addr)
+                break
 
             if msg_type == MsgType.DISCONNECT:
                 break
@@ -273,7 +286,8 @@ class ClientSession(threading.Thread):
         t0 = time.perf_counter()
         try:
             result = subprocess.run(
-                command, shell=True, capture_output=True, text=True, timeout=timeout
+                command, shell=True, capture_output=True, text=True,
+                timeout=timeout, stdin=subprocess.DEVNULL
             )
             duration_ms = (time.perf_counter() - t0) * 1000
             self._perf.append(duration_ms)
@@ -291,25 +305,37 @@ class ClientSession(threading.Thread):
                 'duration_ms': round(duration_ms, 2),
             })
         except subprocess.TimeoutExpired:
+            duration_ms = (time.perf_counter() - t0) * 1000
+            self._perf.append(duration_ms)
             self._send(MsgType.CMD_RESPONSE, {
                 'req_id': req_id, 'status': int(CmdStatus.TIMEOUT),
                 'stderr': f'Command timed out after {timeout}s',
                 'stdout': '', 'exit_code': -3,
+                'duration_ms': round(duration_ms, 2),
             })
         except Exception as e:
+            duration_ms = (time.perf_counter() - t0) * 1000
+            self._perf.append(duration_ms)
             self._send(MsgType.CMD_RESPONSE, {
                 'req_id': req_id, 'status': int(CmdStatus.ERROR),
                 'stderr': str(e), 'stdout': '', 'exit_code': -4,
+                'duration_ms': round(duration_ms, 2),
             })
 
     # ── Helpers ──────────────────────────────
     def _send_raw(self, msg_type: int, payload: dict):
         pkt = build_secure_packet(msg_type, payload)
-        self.conn.sendall(pkt)
+        try:
+            self.conn.sendall(pkt)
+        except Exception:
+            pass
 
     def _send(self, msg_type: int, payload: dict):
         pkt = build_secure_packet(msg_type, payload, self.session_key)
-        self.conn.sendall(pkt)
+        try:
+            self.conn.sendall(pkt)
+        except Exception:
+            pass
 
     def _log_perf_summary(self):
         if not self._perf:

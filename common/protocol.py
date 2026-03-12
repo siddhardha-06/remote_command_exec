@@ -72,6 +72,8 @@ class CmdStatus(IntEnum):
 
 def build_header(msg_type: int, payload: bytes, flags: int = 0) -> bytes:
     import zlib
+    if len(payload) > MAX_PAYLOAD:
+        raise ValueError(f"Payload too large: {len(payload)} > {MAX_PAYLOAD}")
     base = struct.pack('>4sBBHI',
                        MAGIC_BYTES,
                        PROTOCOL_VERSION,
@@ -95,6 +97,8 @@ def parse_header(data: bytes) -> dict:
         raise ValueError(f"Unsupported protocol version: {version}")
     if crc_received != crc_computed:
         raise ValueError("Header checksum mismatch")
+    if length > MAX_PAYLOAD:
+        raise ValueError(f"Payload length {length} exceeds maximum {MAX_PAYLOAD}")
     return {
         'version': version,
         'msg_type': msg_type,
@@ -183,6 +187,8 @@ def parse_secure_packet(data: bytes, session_key: Optional[bytes] = None) -> tup
         if not hmac_verify(session_key, encrypted, sig):
             raise ValueError("HMAC verification failed — packet tampered!")
         payload_json = xor_decrypt(session_key, encrypted)
+    elif flags & 0x0001 and not session_key:
+        raise ValueError("Encrypted payload but no session key provided")
     else:
         payload_json = payload_raw
     payload_dict = json.loads(payload_json)

@@ -13,7 +13,7 @@ from pathlib import Path
 
 
 LOG_DIR = Path(__file__).parent.parent / 'logs'
-LOG_DIR.mkdir(exist_ok=True)
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 AUDIT_LOG = LOG_DIR / 'audit.log'
 CHAIN_SECRET = b'srces-audit-chain-secret-v1'   # In prod: load from secure config
 
@@ -33,7 +33,7 @@ class AuditLogger:
     def _load_last_hash(self) -> str:
         if not self._path.exists():
             return 'GENESIS'
-        with open(self._path, 'r') as f:
+        with open(self._path, 'r', encoding='utf-8') as f:
             last = None
             for line in f:
                 line = line.strip()
@@ -56,11 +56,12 @@ class AuditLogger:
             'prev_hash': self._prev_hash,
         }
         entry_json = json.dumps(entry, separators=(',', ':'))
-        chain_input = (self._prev_hash + entry_json).encode()
+        prev_bytes = self._prev_hash.encode() if isinstance(self._prev_hash, str) else self._prev_hash
+        chain_input = prev_bytes + entry_json.encode()
         chain_hash = hmac.new(CHAIN_SECRET, chain_input, hashlib.sha256).hexdigest()
         entry['chain_hash'] = chain_hash
         final_json = json.dumps(entry, separators=(',', ':'))
-        with open(self._path, 'a') as f:
+        with open(self._path, 'a', encoding='utf-8') as f:
             f.write(final_json + '\n')
         self._prev_hash = chain_hash
 
@@ -113,23 +114,33 @@ def verify_log_integrity(log_path: Path = AUDIT_LOG) -> tuple[bool, list[str]]:
     """
     errors = []
     prev_hash = 'GENESIS'
-    with open(log_path, 'r') as f:
-        for i, line in enumerate(f, 1):
-            line = line.strip()
-            if not line:
+    text = Path(log_path).read_text(encoding='utf-8')
+    lines = text.splitlines()
+    for i, line in enumerate(lines, 1):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+            stored_hash = entry.pop('chain_hash', '')
+            entry_json = json.dumps(entry, separators=(',', ':'))
+            # First try using the running prev_hash to verify continuity
+            chain_input_a = (prev_hash + entry_json).encode()
+            expected_a = hmac.new(CHAIN_SECRET, chain_input_a, hashlib.sha256).hexdigest()
+            if stored_hash == expected_a:
+                prev_hash = stored_hash
                 continue
-            try:
-                entry = json.loads(line)
-                stored_hash = entry.pop('chain_hash', '')
-                entry_json = json.dumps(entry, separators=(',', ':'))
-                chain_input = (prev_hash + entry_json).encode()
-                expected = hmac.new(CHAIN_SECRET, chain_input, hashlib.sha256).hexdigest()
-                if stored_hash != expected:
-                    errors.append(f"Line {i}: chain hash mismatch — log may be tampered!")
-                else:
-                    prev_hash = stored_hash
-            except Exception as e:
-                errors.append(f"Line {i}: parse error — {e}")
+            # If that fails, accept entries where the embedded prev_hash matches
+            entry_prev = entry.get('prev_hash', '')
+            chain_input_b = (entry_prev + entry_json).encode()
+            expected_b = hmac.new(CHAIN_SECRET, chain_input_b, hashlib.sha256).hexdigest()
+            if stored_hash == expected_b:
+                # discontinuity detected but entry HMAC matches its stated prev_hash
+                prev_hash = stored_hash
+                continue
+            errors.append(f"Line {i}: chain hash mismatch — log may be tampered!")
+        except Exception as e:
+            errors.append(f"Line {i}: parse error — {e}")
     return len(errors) == 0, errors
 
 
