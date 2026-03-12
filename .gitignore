@@ -28,3 +28,5 @@ Thumbs.db
 
 # Secrets / runtime files
 server/users.json
+
+audit.log
