@@ -1,0 +1,75 @@
+{
+  "admin": {
+    "salt": "a528a62eb882ab09",
+    "password_hash": "f86025a332f75b59195d2628939598fe4dc6e3919c4897854b8d88ea7020f049",
+    "role": "admin",
+    "allowed_commands": [
+      "*"
+    ],
+    "max_sessions": 3,
+    "failed_attempts": 0,
+    "locked": false
+  },
+  "operator": {
+    "salt": "3382453230ec2cdb",
+    "password_hash": "84fa4603e048d3256b6b1c2d47a988ef6a4401b15ff78b841751f9f08ffe5df8",
+    "role": "operator",
+    "allowed_commands": [
+      "dir",
+      "echo",
+      "hostname",
+      "whoami",
+      "date",
+      "time",
+      "ipconfig",
+      "ping",
+      "type",
+      "cd",
+      "ver",
+      "set",
+      "tasklist",
+      "systeminfo",
+      "netstat"
+    ],
+    "max_sessions": 2,
+    "failed_attempts": 0,
+    "locked": false
+  },
+  "analyst": {
+    "salt": "44cb3d8b466deb08",
+    "password_hash": "88e24673cc0f6a4dab422c769ab55abe565c87457150c9c1f2fca9aba7330ea0",
+    "role": "analyst",
+    "allowed_commands": [
+      "dir",
+      "echo",
+      "hostname",
+      "whoami",
+      "date",
+      "type",
+      "ver",
+      "ipconfig",
+      "netstat"
+    ],
+    "max_sessions": 1,
+    "failed_attempts": 0,
+    "locked": false
+  },
+  "monitor": {
+    "salt": "357334494466edf9",
+    "password_hash": "598878c48eeec7e5fd1282b2d8a4ad18b8c81d9968440d29fabaeb403d7f888b",
+    "role": "monitor",
+    "allowed_commands": [
+      "tasklist",
+      "systeminfo",
+      "netstat",
+      "ipconfig",
+      "hostname",
+      "date",
+      "time",
+      "ver"
+    ],
+    "max_sessions": 1,
+    "failed_attempts": 0,
+    "locked": false
+  }
+}
